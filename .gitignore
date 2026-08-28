@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 빌드 산출물
+build/
+dist/
+*.spec.bak
+packaging/installer_out/
+*.exe
+*.zip
+
+# 변환 결과 / 테스트 미디어
+*.srt
+*.vtt
+/samples/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

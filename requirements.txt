@@ -1,0 +1,4 @@
+# 변환 엔진. ctranslate2 · av(PyAV) · tokenizers · huggingface_hub · onnxruntime 를 함께 설치한다.
+# PyAV 에 ffmpeg 디코더가 내장되어 있어 별도 ffmpeg 설치가 필요 없다.
+faster-whisper>=1.1.0
+onnxruntime>=1.17          # faster-whisper 의 Silero VAD 용 (명시적으로 고정)
