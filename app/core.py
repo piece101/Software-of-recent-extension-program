@@ -55,8 +55,16 @@ _model_cache: dict[tuple, object] = {}
 
 
 def _resolve_device(device: str, compute_type: Optional[str]) -> tuple[str, str]:
-    resolved = device
-    if device == "auto":
+    # 환경변수로 강제 가능:  RECLIPSUBS_DEVICE = cpu | cuda | auto
+    env = (os.environ.get("RECLIPSUBS_DEVICE") or "").strip().lower()
+    if env in ("cpu", "cuda", "auto"):
+        device = env
+
+    # 'auto' 는 CPU 를 기본값으로 한다. GPU 는 CUDA 런타임(cuBLAS/cuDNN)이
+    # 따로 설치돼 있어야 하는데 대부분의 PC 에는 없으므로, 명시적으로 'cuda'
+    # 를 골랐을 때만 GPU 를 쓴다(그때도 실패하면 호출부에서 CPU 로 되돌린다).
+    resolved = "cpu"
+    if device == "cuda":
         try:
             import ctranslate2
 
@@ -135,39 +143,54 @@ def transcribe_file(
     out_dir = Path(outdir) if outdir else input_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    already = is_model_downloaded(model_size)
-    if not already:
+    if not is_model_downloaded(model_size):
         log(f"모델 '{model_size}' 다운로드 중… (최초 1회, 이후 재사용)")
 
-    model, dev, ct = load_model(model_size, device=device, compute_type=compute_type)
-    log(f"엔진 준비 완료 · {dev}/{ct} · {os.cpu_count()}스레드")
-
     common = dict(language=language, task=task, beam_size=beam_size)
-    seg_iter, info = _run_transcribe(
-        model, str(input_path), batch_size=batch_size, common=common, vad_filter=True
-    )
 
-    duration = float(getattr(info, "duration", 0.0) or 0.0)
-    detected = getattr(info, "language", None)
-    prob = float(getattr(info, "language_probability", 0.0) or 0.0)
-    if language is None and detected:
-        log(f"감지된 언어: {detected} ({prob:.0%})")
+    def _collect(dev_req: str, ct_req: Optional[str]) -> list[Segment]:
+        model, dev, ct = load_model(model_size, device=dev_req, compute_type=ct_req)
+        log(f"엔진 준비 완료 · {dev}/{ct} · {os.cpu_count()}스레드")
+        seg_iter, info = _run_transcribe(
+            model, str(input_path), batch_size=batch_size, common=common, vad_filter=True
+        )
+        duration = float(getattr(info, "duration", 0.0) or 0.0)
+        detected = getattr(info, "language", None)
+        prob = float(getattr(info, "language_probability", 0.0) or 0.0)
+        if language is None and detected:
+            log(f"감지된 언어: {detected} ({prob:.0%})")
 
-    log("음성 인식 중…")
-    segments: list[Segment] = []
-    last_pct = -1
-    for s in seg_iter:
-        if should_cancel and should_cancel():
-            raise KeyboardInterrupt
-        text = (s.text or "").strip()
-        if not text:
-            continue
-        segments.append(Segment(len(segments) + 1, s.start, s.end, text))
-        if duration > 0:
-            pct = int(min(s.end / duration, 0.999) * 100)
-            if pct != last_pct:
-                last_pct = pct
-                log(f"음성 인식 {int(s.end)}s / {int(duration)}s", pct / 100)
+        log("음성 인식 중…")
+        out: list[Segment] = []
+        last_pct = -1
+        for s in seg_iter:
+            if should_cancel and should_cancel():
+                raise KeyboardInterrupt
+            text = (s.text or "").strip()
+            if not text:
+                continue
+            out.append(Segment(len(out) + 1, s.start, s.end, text))
+            if duration > 0:
+                pct = int(min(s.end / duration, 0.999) * 100)
+                if pct != last_pct:
+                    last_pct = pct
+                    log(f"음성 인식 {int(s.end)}s / {int(duration)}s", pct / 100)
+        return out
+
+    resolved_device, _ = _resolve_device(device, compute_type)
+    try:
+        segments = _collect(device, compute_type)
+    except KeyboardInterrupt:
+        raise
+    except Exception as e:  # noqa: BLE001
+        low = str(e).lower()
+        gpu_err = any(k in low for k in ("cublas", "cudnn", "cuda", "libcu", "gpu"))
+        if resolved_device == "cuda" and gpu_err:
+            log("GPU(CUDA) 라이브러리를 불러오지 못했습니다 → CPU로 다시 시도합니다.")
+            _model_cache.pop((model_size, "cuda", "float16"), None)
+            segments = _collect("cpu", "int8")
+        else:
+            raise
 
     if not segments:
         raise RuntimeError("인식된 음성이 없습니다. 파일에 말소리가 있는지 확인하세요.")

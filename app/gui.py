@@ -132,6 +132,12 @@ class App:
         ttk.Combobox(opt, textvariable=self.task_var, values=["transcribe", "translate"],
                      state="readonly", width=12).grid(row=2, column=3, sticky="w", padx=4)
 
+        ttk.Label(opt, text="장치").grid(row=2, column=4, sticky="w", padx=6)
+        self.device_var = StringVar(value="자동(CPU)")
+        ttk.Combobox(opt, textvariable=self.device_var,
+                     values=["자동(CPU)", "GPU(NVIDIA)"],
+                     state="readonly", width=12).grid(row=2, column=5, sticky="w", padx=4)
+
         ttk.Label(opt, text="출력 형식").grid(row=3, column=0, sticky="w", padx=6, pady=4)
         self.fmt_vars = {}
         for i, f in enumerate(FORMATS):
@@ -283,6 +289,7 @@ class App:
         self.pct.config(text="")
         self._log_clear()
 
+        device = "cuda" if self.device_var.get().startswith("GPU") else "auto"
         self.worker = threading.Thread(
             target=self._run_worker,
             kwargs=dict(
@@ -292,6 +299,7 @@ class App:
                 batch_size=preset["batch_size"],
                 language=core.LANGUAGES.get(self.lang_var.get()),
                 task=self.task_var.get(),
+                device=device,
                 formats=formats,
                 outdir=self.outdir_var.get().strip() or None,
             ),
@@ -303,7 +311,7 @@ class App:
         self.cancel_event.set()
         self._enqueue(-1, "취소 요청됨… 현재 구간까지 마치고 중단합니다.")
 
-    def _run_worker(self, files, model_size, beam_size, batch_size, language, task, formats, outdir):
+    def _run_worker(self, files, model_size, beam_size, batch_size, language, task, device, formats, outdir):
         total = len(files)
         try:
             for idx, path in enumerate(files, start=1):
@@ -326,6 +334,7 @@ class App:
                         task=task,
                         beam_size=beam_size,
                         batch_size=batch_size,
+                        device=device,
                         formats=formats,
                         outdir=outdir,
                         on_progress=on_progress,
