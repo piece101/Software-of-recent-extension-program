@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from .subtitles import WRITERS, Segment
+from .subtitles import WRITERS, Segment, output_path
 
 APP_NAME = "ReclipSubs"
 
@@ -175,9 +175,9 @@ def transcribe_file(
     stem = input_path.stem
     written: list[Path] = []
     for f in formats:
-        out_path = out_dir / f"{stem}.{f}"
-        WRITERS[f](segments, out_path)
-        written.append(out_path)
+        out_p = output_path(out_dir, stem, f)
+        WRITERS[f](segments, out_p)
+        written.append(out_p)
 
     log("완료!", 1.0)
     return written
